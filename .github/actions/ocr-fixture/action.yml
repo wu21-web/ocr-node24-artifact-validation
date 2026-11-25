@@ -1,6 +1,6 @@
 ---
 name: OCR fixture review and artifact steps
-description: Extracted from d59e7ae665586a6131ae84c17203cc6032dd303c
+description: Extracted from 9007ae84e0de7b84d72f9833f6b12a2a731d5cbd
 inputs:
   llm_url:
     description: LLM API endpoint URL (mapped to env OCR_LLM_URL).
@@ -272,7 +272,7 @@ runs:
       cat /tmp/ocr-stderr.log
   - name: Upload review artifacts
     if: "${{ always() && inputs.upload_artifacts == 'true' }}"
-    uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+    uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
     with:
       name: ocr-review-result-${{ github.run_id }}-${{ github.run_attempt }}
       path: |

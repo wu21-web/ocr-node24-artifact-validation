@@ -1,12 +1,12 @@
 ---
 name: OCR error diagnostics
-run-name: OCR error diagnostics · d59e7ae665586a6131ae84c17203cc6032dd303c
+run-name: OCR error diagnostics · 9007ae84e0de7b84d72f9833f6b12a2a731d5cbd
 'on':
   workflow_dispatch: {}
 permissions:
   contents: read
 env:
-  TESTED_SHA: d59e7ae665586a6131ae84c17203cc6032dd303c
+  TESTED_SHA: 9007ae84e0de7b84d72f9833f6b12a2a731d5cbd
 jobs:
   review-error:
     runs-on:
