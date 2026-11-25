@@ -7,6 +7,9 @@ jobs:
   runner:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    strategy:
+      matrix:
+        instance: [1, 2]
     steps:
       - name: Verify and start the production-version runner on this isolated VM
         shell: bash
@@ -24,7 +27,9 @@ jobs:
           test "$(./bin/Runner.Listener --version)" = 2.338.2
           docker version
           ./config.sh --unattended --url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
-            --token "$RUNNER_REGISTRATION_TOKEN" --name "ocr-artifact-${GITHUB_RUN_ID}" \
+            --token "$RUNNER_REGISTRATION_TOKEN" --name "ocr-artifact-${GITHUB_RUN_ID}-${{ matrix.instance }}" \
             --labels ocr-artifact-dry-run --disableupdate
           unset RUNNER_REGISTRATION_TOKEN
+          # The outer hosted runner uses this flag to exit after one job.
+          unset ACTIONS_RUNNER_RETURN_JOB_RESULT_FOR_HOSTED
           ./run.sh
