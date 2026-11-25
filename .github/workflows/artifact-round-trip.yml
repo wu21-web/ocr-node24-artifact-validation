@@ -1,0 +1,293 @@
+---
+name: Artifact round trip
+run-name: Artifact round trip · d59e7ae665586a6131ae84c17203cc6032dd303c
+'on':
+  workflow_dispatch: {}
+permissions:
+  contents: read
+env:
+  TESTED_SHA: d59e7ae665586a6131ae84c17203cc6032dd303c
+jobs:
+  review-opt-out:
+    runs-on:
+    - self-hosted
+    - Linux
+    - X64
+    - ocr-artifact-dry-run
+    container:
+      image: node:24.22.1
+    timeout-minutes: 10
+    env:
+      FIXTURE_EXIT: '0'
+      MERGE_BASE: fixture-base
+      HEAD_SHA: fixture-head
+      REVIEW_TASK_TIMEOUT: '15'
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - name: Record tested source SHA
+      shell: bash
+      run: 'printf ''Tested source SHA: %s\n'' "$TESTED_SHA" >> "$GITHUB_STEP_SUMMARY"
+
+        '
+    - name: Install synthetic OCR command
+      shell: bash
+      run: |
+        mkdir -p "$RUNNER_TEMP/ocr-fixture"
+        cat > "$RUNNER_TEMP/ocr-fixture/ocr" <<'FAKE'
+        #!/usr/bin/env bash
+        set -eu
+        test "$1" = review
+        printf '{"fixture":"ocr","exit":%s}\n' "$FIXTURE_EXIT"
+        printf 'synthetic OCR diagnostic exit=%s\n' "$FIXTURE_EXIT" >&2
+        exit "$FIXTURE_EXIT"
+        FAKE
+        chmod +x "$RUNNER_TEMP/ocr-fixture/ocr"
+        printf '%s\n' "$RUNNER_TEMP/ocr-fixture" >> "$GITHUB_PATH"
+    - id: review
+      uses: "./.github/actions/ocr-fixture"
+      with:
+        llm_url: https://example.invalid/v1
+        llm_auth_token: fixture
+        llm_model: fixture
+        llm_use_anthropic: 'false'
+        upload_artifacts: 'false'
+  verify-opt-out:
+    runs-on: ubuntu-latest
+    needs: review-opt-out
+    timeout-minutes: 10
+    steps:
+    - name: Record tested source SHA
+      shell: bash
+      run: 'printf ''Tested source SHA: %s\n'' "$TESTED_SHA" >> "$GITHUB_STEP_SUMMARY"
+
+        '
+    - name: Download review artifact in a separate job
+      uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
+      with:
+        pattern: ocr-review-result-${{ github.run_id }}-${{ github.run_attempt }}
+        path: review-download
+    - name: Verify no review artifact is present
+      shell: bash
+      run: |
+        mkdir -p review-download
+        test -z "$(find review-download -mindepth 1 -print)"
+  review-success:
+    runs-on:
+    - self-hosted
+    - Linux
+    - X64
+    - ocr-artifact-dry-run
+    container:
+      image: node:24.22.1
+    timeout-minutes: 10
+    env:
+      FIXTURE_EXIT: '0'
+      MERGE_BASE: fixture-base
+      HEAD_SHA: fixture-head
+      REVIEW_TASK_TIMEOUT: '15'
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - name: Record tested source SHA
+      shell: bash
+      run: 'printf ''Tested source SHA: %s\n'' "$TESTED_SHA" >> "$GITHUB_STEP_SUMMARY"
+
+        '
+    - name: Install synthetic OCR command
+      shell: bash
+      run: |
+        mkdir -p "$RUNNER_TEMP/ocr-fixture"
+        cat > "$RUNNER_TEMP/ocr-fixture/ocr" <<'FAKE'
+        #!/usr/bin/env bash
+        set -eu
+        test "$1" = review
+        printf '{"fixture":"ocr","exit":%s}\n' "$FIXTURE_EXIT"
+        printf 'synthetic OCR diagnostic exit=%s\n' "$FIXTURE_EXIT" >&2
+        exit "$FIXTURE_EXIT"
+        FAKE
+        chmod +x "$RUNNER_TEMP/ocr-fixture/ocr"
+        printf '%s\n' "$RUNNER_TEMP/ocr-fixture" >> "$GITHUB_PATH"
+    - id: review
+      uses: "./.github/actions/ocr-fixture"
+      with:
+        llm_url: https://example.invalid/v1
+        llm_auth_token: fixture
+        llm_model: fixture
+        llm_use_anthropic: 'false'
+        upload_artifacts: 'true'
+    needs: verify-opt-out
+  verify-success:
+    runs-on: ubuntu-latest
+    needs: review-success
+    timeout-minutes: 10
+    steps:
+    - name: Record tested source SHA
+      shell: bash
+      run: 'printf ''Tested source SHA: %s\n'' "$TESTED_SHA" >> "$GITHUB_STEP_SUMMARY"
+
+        '
+    - name: Download review artifact in a separate job
+      uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
+      with:
+        name: ocr-review-result-${{ github.run_id }}-${{ github.run_attempt }}
+        path: review-download
+    - name: Verify both artifact names and SHA-256 hashes
+      shell: bash
+      run: |
+        printf '%s\n' ocr-result.json ocr-stderr.log > expected-files
+        find review-download -mindepth 1 -printf '%P\n' | sort > downloaded-files
+        diff -u expected-files downloaded-files
+        mkdir expected
+        printf '{"fixture":"ocr","exit":%s}\n' "$FIXTURE_EXIT" > expected/ocr-result.json
+        printf 'synthetic OCR diagnostic exit=%s\n' "$FIXTURE_EXIT" > expected/ocr-stderr.log
+        (cd expected && sha256sum ocr-result.json ocr-stderr.log) > expected-sha256
+        (cd review-download && sha256sum --check ../expected-sha256)
+      env:
+        FIXTURE_EXIT: '0'
+  build:
+    runs-on:
+    - self-hosted
+    - Linux
+    - X64
+    - ocr-artifact-dry-run
+    container:
+      image: golang:1.26.11
+      options: "--cpus=2"
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        include:
+        - goos: linux
+          goarch: amd64
+        - goos: linux
+          goarch: arm64
+        - goos: darwin
+          goarch: amd64
+        - goos: darwin
+          goarch: arm64
+        - goos: windows
+          goarch: amd64
+        - goos: windows
+          goarch: arm64
+    steps:
+    - name: Record tested source SHA
+      shell: bash
+      run: 'printf ''Tested source SHA: %s\n'' "$TESTED_SHA" >> "$GITHUB_STEP_SUMMARY"
+
+        '
+    - name: Write synthetic platform binary
+      shell: bash
+      run: |
+        BIN_NAME=opencodereview-${{ matrix.goos }}-${{ matrix.goarch }}
+        if [ "${{ matrix.goos }}" = "windows" ]; then
+          BIN_NAME="${BIN_NAME}.exe"
+        fi
+        printf 'synthetic artifact: %s\n' "$BIN_NAME" > "$BIN_NAME"
+        echo "bin_name=${BIN_NAME}" >> $GITHUB_ENV
+    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: binary-${{ matrix.goos }}-${{ matrix.goarch }}
+        path: "${{ env.bin_name }}"
+  release:
+    runs-on:
+    - self-hosted
+    - Linux
+    - X64
+    - ocr-artifact-dry-run
+    container:
+      image: ubuntu:24.04
+    needs: build
+    timeout-minutes: 20
+    steps:
+    - name: Record tested source SHA
+      shell: bash
+      run: 'printf ''Tested source SHA: %s\n'' "$TESTED_SHA" >> "$GITHUB_STEP_SUMMARY"
+
+        '
+    - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
+      with:
+        pattern: binary-*
+        merge-multiple: true
+    - name: Verify six root paths and SHA-256 hashes
+      shell: bash
+      run: |
+        printf '%s\n' opencodereview-darwin-amd64 opencodereview-darwin-arm64 opencodereview-linux-amd64 opencodereview-linux-arm64 opencodereview-windows-amd64.exe opencodereview-windows-arm64.exe > expected-files
+        find . -name 'opencodereview-*' -printf '%P\n' | sort > downloaded-files
+        diff -u expected-files downloaded-files
+        while IFS= read -r file; do
+          hash=$(printf 'synthetic artifact: %s\n' "$file" | sha256sum | cut -d ' ' -f 1)
+          printf '%s  %s\n' "$hash" "$file"
+        done < expected-files > expected-sha256
+        sha256sum --check expected-sha256
+    - name: Generate checksums
+      run: sha256sum opencodereview-* | sort > sha256sum.txt
+    - name: Verify generated release checksum file
+      shell: bash
+      run: diff -u <(sort expected-sha256) sha256sum.txt
+  npm-copy:
+    runs-on: ubuntu-latest
+    container:
+      image: node:24.22.1
+    needs: release
+    timeout-minutes: 15
+    steps:
+    - name: Record tested source SHA
+      shell: bash
+      run: 'printf ''Tested source SHA: %s\n'' "$TESTED_SHA" >> "$GITHUB_STEP_SUMMARY"
+
+        '
+    - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
+      with:
+        pattern: binary-*
+        merge-multiple: true
+    - name: Verify six root paths and SHA-256 hashes
+      shell: bash
+      run: |
+        printf '%s\n' opencodereview-darwin-amd64 opencodereview-darwin-arm64 opencodereview-linux-amd64 opencodereview-linux-arm64 opencodereview-windows-amd64.exe opencodereview-windows-arm64.exe > expected-files
+        find . -name 'opencodereview-*' -printf '%P\n' | sort > downloaded-files
+        diff -u expected-files downloaded-files
+        while IFS= read -r file; do
+          hash=$(printf 'synthetic artifact: %s\n' "$file" | sha256sum | cut -d ' ' -f 1)
+          printf '%s  %s\n' "$hash" "$file"
+        done < expected-files > expected-sha256
+        sha256sum --check expected-sha256
+    - name: Stage npm package binaries
+      shell: bash
+      run: |
+        PLATFORMS="darwin-arm64:opencodereview-darwin-arm64:opencodereview
+        darwin-x64:opencodereview-darwin-amd64:opencodereview
+        linux-arm64:opencodereview-linux-arm64:opencodereview
+        linux-x64:opencodereview-linux-amd64:opencodereview
+        win32-arm64:opencodereview-windows-arm64.exe:opencodereview.exe
+        win32-x64:opencodereview-windows-amd64.exe:opencodereview.exe"
+
+        for entry in $PLATFORMS; do
+          platform_dir="${entry%%:*}"
+          rest="${entry#*:}"
+          dist_binary="${rest%%:*}"
+          dest_name="${rest#*:}"
+          pkg_dir="./npm/$platform_dir"
+          mkdir -p "$pkg_dir/bin"
+          cp "$dist_binary" "$pkg_dir/bin/$dest_name"
+          chmod 755 "$pkg_dir/bin/$dest_name" 2>/dev/null || true
+        done
+    - name: Verify copied npm package binaries
+      shell: bash
+      run: |
+        shopt -s nullglob
+        files=(npm/*/bin/*)
+        test "${#files[@]}" -eq 6
+        check() {
+          local platform="$1" src="$2" dest="$3"
+          cmp "$src" "npm/$platform/bin/$dest"
+          sha256sum "npm/$platform/bin/$dest"
+        }
+        check darwin-arm64 opencodereview-darwin-arm64 opencodereview
+        check darwin-x64 opencodereview-darwin-amd64 opencodereview
+        check linux-arm64 opencodereview-linux-arm64 opencodereview
+        check linux-x64 opencodereview-linux-amd64 opencodereview
+        check win32-arm64 opencodereview-windows-arm64.exe opencodereview.exe
+        check win32-x64 opencodereview-windows-amd64.exe opencodereview.exe

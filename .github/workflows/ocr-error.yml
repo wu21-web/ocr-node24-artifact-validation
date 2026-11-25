@@ -1,0 +1,91 @@
+---
+name: OCR error diagnostics
+run-name: OCR error diagnostics · d59e7ae665586a6131ae84c17203cc6032dd303c
+'on':
+  workflow_dispatch: {}
+permissions:
+  contents: read
+env:
+  TESTED_SHA: d59e7ae665586a6131ae84c17203cc6032dd303c
+jobs:
+  review-error:
+    runs-on:
+    - self-hosted
+    - Linux
+    - X64
+    - ocr-artifact-dry-run
+    container:
+      image: node:24.22.1
+    timeout-minutes: 10
+    env:
+      FIXTURE_EXIT: '23'
+      MERGE_BASE: fixture-base
+      HEAD_SHA: fixture-head
+      REVIEW_TASK_TIMEOUT: '15'
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - name: Record tested source SHA
+      shell: bash
+      run: 'printf ''Tested source SHA: %s\n'' "$TESTED_SHA" >> "$GITHUB_STEP_SUMMARY"
+
+        '
+    - name: Install synthetic OCR command
+      shell: bash
+      run: |
+        mkdir -p "$RUNNER_TEMP/ocr-fixture"
+        cat > "$RUNNER_TEMP/ocr-fixture/ocr" <<'FAKE'
+        #!/usr/bin/env bash
+        set -eu
+        test "$1" = review
+        printf '{"fixture":"ocr","exit":%s}\n' "$FIXTURE_EXIT"
+        printf 'synthetic OCR diagnostic exit=%s\n' "$FIXTURE_EXIT" >&2
+        exit "$FIXTURE_EXIT"
+        FAKE
+        chmod +x "$RUNNER_TEMP/ocr-fixture/ocr"
+        printf '%s\n' "$RUNNER_TEMP/ocr-fixture" >> "$GITHUB_PATH"
+    - id: review
+      uses: "./.github/actions/ocr-fixture"
+      with:
+        llm_url: https://example.invalid/v1
+        llm_auth_token: fixture
+        llm_model: fixture
+        llm_use_anthropic: 'false'
+        upload_artifacts: 'true'
+      continue-on-error: true
+    - name: Require the expected review failure
+      shell: bash
+      run: |
+        test "$REVIEW_OUTCOME" = failure
+        test "$OCR_EXIT_CODE" = "$FIXTURE_EXIT"
+      env:
+        REVIEW_OUTCOME: "${{ steps.review.outcome }}"
+  verify-error:
+    runs-on: ubuntu-latest
+    needs: review-error
+    timeout-minutes: 10
+    steps:
+    - name: Record tested source SHA
+      shell: bash
+      run: 'printf ''Tested source SHA: %s\n'' "$TESTED_SHA" >> "$GITHUB_STEP_SUMMARY"
+
+        '
+    - name: Download review artifact in a separate job
+      uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
+      with:
+        name: ocr-review-result-${{ github.run_id }}-${{ github.run_attempt }}
+        path: review-download
+    - name: Verify both artifact names and SHA-256 hashes
+      shell: bash
+      run: |
+        printf '%s\n' ocr-result.json ocr-stderr.log > expected-files
+        find review-download -mindepth 1 -printf '%P\n' | sort > downloaded-files
+        diff -u expected-files downloaded-files
+        mkdir expected
+        printf '{"fixture":"ocr","exit":%s}\n' "$FIXTURE_EXIT" > expected/ocr-result.json
+        printf 'synthetic OCR diagnostic exit=%s\n' "$FIXTURE_EXIT" > expected/ocr-stderr.log
+        (cd expected && sha256sum ocr-result.json ocr-stderr.log) > expected-sha256
+        (cd review-download && sha256sum --check ../expected-sha256)
+      env:
+        FIXTURE_EXIT: '23'
