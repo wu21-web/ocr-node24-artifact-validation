@@ -1,0 +1,31 @@
+name: Temporary isolated artifact runner
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  runner:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Verify and start the production-version runner on this isolated VM
+        shell: bash
+        env:
+          RUNNER_REGISTRATION_TOKEN: ${{ secrets.ISOLATED_RUNNER_REGISTRATION }}
+        run: |
+          test -n "$RUNNER_REGISTRATION_TOKEN"
+          cd "$RUNNER_TEMP"
+          mkdir ocr-artifact-runner
+          cd ocr-artifact-runner
+          url=https://github.com/actions/runner/releases/download/v2.338.2/actions-runner-linux-x64-2.338.2.tar.gz
+          curl --fail --silent --show-error --location "$url" -o runner.tar.gz
+          printf '%s  %s\n' baebf204307bac6193480852732f0aba2ae97b6c5597c244f4d5558390147c40 runner.tar.gz | sha256sum --check
+          tar -xzf runner.tar.gz
+          test "$(./bin/Runner.Listener --version)" = 2.338.2
+          docker version
+          ./config.sh --unattended --url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            --token "$RUNNER_REGISTRATION_TOKEN" --name "ocr-artifact-${GITHUB_RUN_ID}" \
+            --labels ocr-artifact-dry-run --disableupdate
+          unset RUNNER_REGISTRATION_TOKEN
+          ./run.sh
